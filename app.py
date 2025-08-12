@@ -137,13 +137,16 @@ def compute_ratios(data_dict):
     return df
 
 
-def plot_kpi(ratios_df, kpi='ROA'):
-    """Genera un gráfico comparativo para el KPI indicado."""
+def plot_kpi(ratios_df, kpi='ROA', years=5):
+    """Genera un gráfico comparativo para el KPI indicado.
+
+    Solo se muestran los últimos ``years`` años disponibles.
+    """
     if ratios_df.empty or kpi not in ratios_df.columns:
         fig, ax = plt.subplots()
         ax.set_title('Sin datos')
         return fig
-    pivot = ratios_df[kpi].unstack(0)
+    pivot = ratios_df[kpi].unstack(0).sort_index().tail(years)
     fig, ax = plt.subplots()
     pivot.plot(ax=ax, marker='o')
     ax.set_ylabel(kpi)
@@ -153,19 +156,43 @@ def plot_kpi(ratios_df, kpi='ROA'):
     return fig
 
 
-def process_files(files, names_text):
+def process_files(files, names_text, statements, ratio):
+    """Procesa los archivos y genera las vistas solicitadas."""
     names = [n.strip() for n in names_text.split(',') if n.strip()]
     if len(files) != len(names):
         raise ValueError('El número de archivos y nombres debe coincidir')
+
+    # Cargar datos por empresa
     data_dict = {}
     for f, name in zip(files, names):
         data_dict.update(load_company_data(f.name, name))
+
+    # Preparar tablas de estados financieros si se solicitaron
+    balance_df = pd.DataFrame()
+    er_df = pd.DataFrame()
+    if 'Balance' in statements:
+        frames = []
+        for company, info in data_dict.items():
+            wide = info['balance']
+            long = wide.melt('Cuenta', var_name='year', value_name='valor')
+            long['company'] = company
+            frames.append(long)
+        if frames:
+            balance_df = pd.concat(frames, ignore_index=True)
+
+    if 'Estado de Resultados' in statements:
+        frames = []
+        for company, info in data_dict.items():
+            wide = info['eres']
+            long = wide.melt('Cuenta', var_name='year', value_name='valor')
+            long['company'] = company
+            frames.append(long)
+        if frames:
+            er_df = pd.concat(frames, ignore_index=True)
+
+    # Calcular ratios
     ratios_df = compute_ratios(data_dict)
-    fig = plot_kpi(ratios_df, 'ROA')
-    desc_md = "\n\n".join(
-        f"**{k}:** {v}" for k, v in ratios_df.attrs.get('descriptions', {}).items()
-    )
-    return ratios_df.reset_index(), fig, desc_md
+
 
 
 demo = gr.Interface(
@@ -173,11 +200,19 @@ demo = gr.Interface(
     inputs=[
         gr.File(label='Estados financieros', file_count='multiple'),
         gr.Textbox(label='Nombres de empresas (orden, separados por coma)'),
+        gr.CheckboxGroup(
+            label='Vistas de estados',
+            choices=['Balance', 'Estado de Resultados'],
+            value=['Balance'],
+        ),
+        gr.Dropdown(
+            label='Ratio',
+            choices=['ROA', 'Total Activos', 'Utilidad Neta'],
+            value='ROA',
+        ),
     ],
     outputs=[
-        gr.Dataframe(label='Ratios comparativos'),
-        gr.Plot(label='ROA comparativo'),
-        gr.Markdown(label='Descripción de ratios'),
+
     ],
     title='Dashboard financiero multicompañía',
 )
