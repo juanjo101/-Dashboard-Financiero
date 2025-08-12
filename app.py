@@ -5,6 +5,15 @@ import matplotlib.pyplot as plt
 import gradio as gr
 
 
+RATIO_DESCRIPTIONS = {
+    "ROA": (
+        "Return on Assets (ROA) eval\u00faa la eficiencia con la que la empresa "
+        "utiliza sus activos para generar utilidades. Un valor m\u00e1s alto "
+        "indica un mejor uso de los activos."
+    ),
+}
+
+
 def _to_number(x):
     if pd.isna(x):
         return np.nan
@@ -100,7 +109,11 @@ def load_company_data(file_obj, company_name):
 
 
 def compute_ratios(data_dict):
-    """Calcula ratios básicos para cada empresa y año."""
+    """Calcula ratios básicos para cada empresa y año.
+
+    El DataFrame resultante incluye en ``attrs['descriptions']`` una
+    explicación de cada ratio calculado, lo que facilita su interpretación.
+    """
     rows = []
     for company, info in data_dict.items():
         years = sorted(set(info['balance_years']) & set(info['er_years']))
@@ -117,8 +130,11 @@ def compute_ratios(data_dict):
             })
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame()
-    return df.set_index(['company', 'year']).sort_index()
+        df.attrs['descriptions'] = RATIO_DESCRIPTIONS
+        return df
+    df = df.set_index(['company', 'year']).sort_index()
+    df.attrs['descriptions'] = RATIO_DESCRIPTIONS
+    return df
 
 
 def plot_kpi(ratios_df, kpi='ROA'):
@@ -146,7 +162,10 @@ def process_files(files, names_text):
         data_dict.update(load_company_data(f.name, name))
     ratios_df = compute_ratios(data_dict)
     fig = plot_kpi(ratios_df, 'ROA')
-    return ratios_df.reset_index(), fig
+    desc_md = "\n\n".join(
+        f"**{k}:** {v}" for k, v in ratios_df.attrs.get('descriptions', {}).items()
+    )
+    return ratios_df.reset_index(), fig, desc_md
 
 
 demo = gr.Interface(
@@ -158,6 +177,7 @@ demo = gr.Interface(
     outputs=[
         gr.Dataframe(label='Ratios comparativos'),
         gr.Plot(label='ROA comparativo'),
+        gr.Markdown(label='Descripción de ratios'),
     ],
     title='Dashboard financiero multicompañía',
 )
